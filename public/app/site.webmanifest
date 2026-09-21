@@ -1,0 +1,27 @@
+{
+  "name": "ProxyTea",
+  "short_name": "ProxyTea",
+  "description": "Certificate-free API mocking & debugging for teams",
+  "theme_color": "#8b5cf6",
+  "background_color": "#080a10",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/pwa-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

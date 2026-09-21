@@ -1,0 +1,806 @@
+/* SuperDebug / ProxyTea SDK v2.0.1 — ES5 UMD build. */
+function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
+(function (root, factory) {
+  var isBrowser = typeof window !== 'undefined';
+  var existing = isBrowser && window.SuperDebug || typeof root !== 'undefined' && root && root.SuperDebug;
+  if (existing) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[SuperDebug] window.SuperDebug namespace already exists — discarding duplicate script execution.');
+    }
+    if ((typeof module === "undefined" ? "undefined" : _typeof(module)) === 'object' && module.exports) {
+      module.exports = existing;
+    }
+    return;
+  }
+  var exp = factory();
+  if ((typeof module === "undefined" ? "undefined" : _typeof(module)) === 'object' && module.exports) {
+    module.exports = exp;
+  } else if (typeof define === 'function' && define.amd) {
+    define([], function () {
+      return exp;
+    });
+  }
+  if (root) {
+    root.SuperDebug = exp;
+  }
+  if (isBrowser) {
+    window.SuperDebug = exp;
+  }
+})(typeof window !== 'undefined' ? window : typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  if (typeof window !== 'undefined' && window.SuperDebug) {
+    return window.SuperDebug;
+  }
+  var __SDK_DEFAULT__;
+  var TAG = '[SuperDebugSDK]';
+  var enabled = false;
+  function setDebug(on) {
+    enabled = Boolean(on);
+  }
+  var log = {
+    info: function info() {
+      if (!enabled) return;
+      var args = [TAG].concat(Array.prototype.slice.call(arguments));
+      console.log.apply(console, args);
+    },
+    warn: function warn() {
+      var args = [TAG].concat(Array.prototype.slice.call(arguments));
+      console.warn.apply(console, args);
+    },
+    error: function error() {
+      var args = [TAG].concat(Array.prototype.slice.call(arguments));
+      console.error.apply(console, args);
+    }
+  };
+  function isPlainObject(v) {
+    return v && _typeof(v) === 'object' && !Array.isArray(v);
+  }
+  function deepMerge(target, source) {
+    if (!isPlainObject(target) || !isPlainObject(source)) return source;
+    Object.keys(source).forEach(function (key) {
+      var val = source[key];
+      if (val === null) {
+        delete target[key];
+      } else if (isPlainObject(val) && isPlainObject(target[key])) {
+        deepMerge(target[key], val);
+      } else {
+        target[key] = val;
+      }
+    });
+    return target;
+  }
+  function safeParse(str, fallback) {
+    try {
+      return JSON.parse(str);
+    } catch (e) {
+      return fallback;
+    }
+  }
+  function matchUrl(requestUrl, matchConfig) {
+    var urlPattern = matchConfig && matchConfig.urlPattern;
+    var matchType = matchConfig && matchConfig.matchType || 'wildcard';
+    if (!urlPattern || urlPattern === '*') return true;
+    switch (matchType) {
+      case 'exact':
+        return requestUrl === urlPattern;
+      case 'wildcard':
+        {
+          var escaped = urlPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+          var regexStr = escaped.replace(/\*/g, '.*');
+          var hasWildcard = urlPattern.indexOf('*') !== -1;
+          var looksLikeFullUrl = urlPattern.indexOf('http://') === 0 || urlPattern.indexOf('https://') === 0;
+          var regex = hasWildcard || looksLikeFullUrl ? new RegExp('^' + regexStr + '$') : new RegExp(regexStr);
+          return regex.test(requestUrl);
+        }
+      case 'regex':
+        try {
+          return new RegExp(urlPattern).test(requestUrl);
+        } catch (e) {
+          return false;
+        }
+      default:
+        return false;
+    }
+  }
+  function matchMethod(method, methods) {
+    if (!methods || methods.length === 0 || methods[0] === '*') return true;
+    var m = String(method || 'GET');
+    return methods.some(function (x) {
+      return String(x).toLowerCase() === m.toLowerCase();
+    });
+  }
+  function getMatchingRules(rules, url, method) {
+    if (!Array.isArray(rules)) return [];
+    return rules.filter(function (rule) {
+      if (!rule || rule.enabled === false) return false;
+      if (!rule.match) return false;
+      return matchUrl(url, rule.match) && matchMethod(method, rule.match.methods);
+    }).sort(function (a, b) {
+      var pa = typeof a.priority === 'number' ? a.priority : 1e9;
+      var pb = typeof b.priority === 'number' ? b.priority : 1e9;
+      return pa - pb;
+    });
+  }
+  function fetchRules(originalFetch, serverBaseUrl, apiKey, includeDisabled) {
+    var base = String(serverBaseUrl || '').replace(/\/+$/, '');
+    var url = base + '/public/rules' + (includeDisabled ? '?includeDisabled=1' : '');
+    return originalFetch(url, {
+      method: 'GET',
+      headers: {
+        'X-API-Key': apiKey
+      },
+      cache: 'no-store'
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function (json) {
+      var rules = json && json.data && Array.isArray(json.data.rules) ? json.data.rules : [];
+      log.info('Fetched ' + rules.length + ' cloud rule(s)');
+      return rules;
+    }).catch(function (err) {
+      log.warn('Rule fetch failed (keeping existing rules):', err && err.message);
+      return null;
+    });
+  }
+  function initFloatingUI(state, controller) {
+    var doc = state.window && state.window.document;
+    if (!doc || !doc.body) return null;
+    var existing = doc.getElementById('superdebug-floating-widget');
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+    if (!doc.getElementById('superdebug-widget-style')) {
+      var style = doc.createElement('style');
+      style.id = 'superdebug-widget-style';
+      style.textContent = "\n      @keyframes sdm-spin {\n        from { transform: rotate(0deg); }\n        to   { transform: rotate(360deg); }\n      }\n      #superdebug-floating-widget {\n        position: fixed;\n        bottom: 20px;\n        right: 20px;\n        z-index: 2147483647;\n        font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n        font-size: 12px;\n        color: #f1f5f9;\n        user-select: none;\n      }\n      .sdm-widget-pill {\n        display: inline-flex;\n        align-items: center;\n        gap: 8px;\n        background: #18202c;\n        border: 1px solid #334358;\n        padding: 7px 14px;\n        border-radius: 9999px;\n        cursor: pointer;\n        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 107, 0, 0.2);\n        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);\n      }\n      .sdm-widget-pill:hover {\n        transform: translateY(-2px);\n        border-color: #ff6b00;\n        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 107, 0, 0.35);\n      }\n      .sdm-widget-dot {\n        width: 8px;\n        height: 8px;\n        border-radius: 50%;\n        background: #00ffaa;\n        box-shadow: 0 0 8px #00ffaa;\n      }\n      .sdm-widget-dot.disabled {\n        background: #64748b;\n        box-shadow: none;\n      }\n      .sdm-widget-brand {\n        font-weight: 750;\n        background: linear-gradient(90deg, #ff8c00, #ff007f);\n        -webkit-background-clip: text;\n        -webkit-text-fill-color: transparent;\n      }\n      .sdm-widget-count {\n        background: #232d3d;\n        color: #94a3b8;\n        padding: 1px 6px;\n        border-radius: 999px;\n        font-size: 11px;\n        font-weight: 700;\n      }\n      .sdm-widget-drawer {\n        position: absolute;\n        bottom: 46px;\n        right: 0;\n        width: 320px;\n        max-height: 440px;\n        background: #141b24;\n        border: 1px solid #35465c;\n        border-radius: 12px;\n        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);\n        display: none;\n        flex-direction: column;\n        overflow: hidden;\n      }\n      .sdm-widget-drawer.open {\n        display: flex;\n      }\n      .sdm-drawer-header {\n        padding: 10px 14px;\n        background: #1a232f;\n        border-bottom: 1px solid #2d3b4d;\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n      }\n      .sdm-drawer-title {\n        font-weight: 700;\n        font-size: 12.5px;\n      }\n      .sdm-drawer-actions {\n        display: flex;\n        align-items: center;\n        gap: 4px;\n      }\n      .sdm-drawer-reload {\n        background: transparent;\n        border: none;\n        color: #94a3b8;\n        font-size: 15px;\n        cursor: pointer;\n        padding: 2px 5px;\n        line-height: 1;\n        border-radius: 4px;\n        transition: color 0.15s, background 0.15s;\n      }\n      .sdm-drawer-reload:hover {\n        color: #00ffaa;\n        background: rgba(0, 255, 170, 0.1);\n      }\n      .sdm-drawer-reload.spinning {\n        animation: sdm-spin 0.8s linear infinite;\n        pointer-events: none;\n        color: #00ffaa;\n      }\n      .sdm-drawer-close {\n        background: transparent;\n        border: none;\n        color: #94a3b8;\n        font-size: 16px;\n        cursor: pointer;\n        padding: 0 4px;\n      }\n      .sdm-drawer-toggle-row {\n        padding: 10px 14px;\n        background: #18202b;\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        border-bottom: 1px solid #283344;\n      }\n      .sdm-btn-toggle {\n        padding: 4px 10px;\n        border-radius: 5px;\n        font-size: 11px;\n        font-weight: 700;\n        cursor: pointer;\n        border: 1px solid transparent;\n      }\n      .sdm-btn-toggle.active {\n        background: rgba(0, 255, 170, 0.15);\n        color: #00ffaa;\n        border-color: rgba(0, 255, 170, 0.4);\n      }\n      .sdm-btn-toggle.inactive {\n        background: rgba(239, 68, 68, 0.15);\n        color: #f87171;\n        border-color: rgba(239, 68, 68, 0.4);\n      }\n      .sdm-rules-list {\n        padding: 8px 14px;\n        overflow-y: auto;\n        max-height: 280px;\n        display: flex;\n        flex-direction: column;\n        gap: 6px;\n      }\n      .sdm-rule-item {\n        background: #1c2634;\n        border: 1px solid #2c3a4c;\n        border-radius: 6px;\n        padding: 6px 10px;\n        display: flex;\n        align-items: center;\n        justify-content: space-between;\n        gap: 8px;\n      }\n      .sdm-rule-pattern {\n        font-family: ui-monospace, monospace;\n        font-size: 11px;\n        color: #cbd5e1;\n        overflow: hidden;\n        text-overflow: ellipsis;\n        white-space: nowrap;\n        max-width: 210px;\n      }\n      .sdm-rule-checkbox {\n        cursor: pointer;\n        accent-color: #ff6b00;\n      }\n    ";
+      doc.head.appendChild(style);
+    }
+    var widget = doc.createElement('div');
+    widget.id = 'superdebug-floating-widget';
+    var isOpen = false;
+    var isReloading = false;
+    function render() {
+      var rules = state.rules || [];
+      var enabledRules = rules.filter(function (r) {
+        return r && r.enabled !== false;
+      });
+      var isProxyActive = state.proxyEnabled !== false;
+      widget.innerHTML = "\n      <div class=\"sdm-widget-drawer ".concat(isOpen ? 'open' : '', "\">\n        <div class=\"sdm-drawer-header\">\n          <span class=\"sdm-drawer-title\">&#x26A1; ProxyTea / SuperDebug</span>\n          <div class=\"sdm-drawer-actions\">\n            <button class=\"sdm-drawer-reload ").concat(isReloading ? 'spinning' : '', "\" id=\"sdm-reload-btn\" title=\"Reload all rules from cloud\">&#x21BB;</button>\n            <button class=\"sdm-drawer-close\" id=\"sdm-close-btn\">&#xD7;</button>\n          </div>\n        </div>\n        <div class=\"sdm-drawer-toggle-row\">\n          <span>Proxy Interception</span>\n          <button class=\"sdm-btn-toggle ").concat(isProxyActive ? 'active' : 'inactive', "\" id=\"sdm-proxy-toggle-btn\">\n            ").concat(isProxyActive ? 'ENABLED' : 'DISABLED', "\n          </button>\n        </div>\n        <div class=\"sdm-rules-list\">\n          ").concat(rules.length === 0 ? '<div style="color:#64748b;font-size:11px;padding:8px 0;">No active rules loaded.</div>' : '', "\n          ").concat(rules.map(function (rule, idx) {
+        var pat = rule.match && rule.match.urlPattern || rule.urlPattern || rule.pattern || '*';
+        var isRuleOn = rule.enabled !== false;
+        var rId = rule.id || rule._id || String(idx);
+        return "\n              <div class=\"sdm-rule-item\">\n                <span class=\"sdm-rule-pattern\" title=\"".concat(pat, "\">").concat(pat, "</span>\n                <input type=\"checkbox\" class=\"sdm-rule-checkbox\" data-rule-id=\"").concat(rId, "\" ").concat(isRuleOn ? 'checked' : '', " />\n              </div>\n            ");
+      }).join(''), "\n        </div>\n      </div>\n      <div class=\"sdm-widget-pill\" id=\"sdm-pill-btn\" title=\"Click to view SuperDebug rules\">\n        <span class=\"sdm-widget-dot ").concat(isProxyActive ? '' : 'disabled', "\"></span>\n        <span class=\"sdm-widget-brand\">ProxyTea</span>\n        <span class=\"sdm-widget-count\">").concat(enabledRules.length, "/").concat(rules.length, "</span>\n      </div>\n    ");
+      var pillBtn = widget.querySelector('#sdm-pill-btn');
+      if (pillBtn) {
+        pillBtn.onclick = function () {
+          isOpen = !isOpen;
+          render();
+        };
+      }
+      var closeBtn = widget.querySelector('#sdm-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = function () {
+          isOpen = false;
+          render();
+        };
+      }
+      var reloadBtn = widget.querySelector('#sdm-reload-btn');
+      if (reloadBtn) {
+        reloadBtn.onclick = function () {
+          if (isReloading) return;
+          isReloading = true;
+          render();
+          var p = typeof controller.loadAllRules === 'function' ? controller.loadAllRules() : Promise.resolve();
+          p.then(function () {
+            isReloading = false;
+            render();
+          }).catch(function () {
+            isReloading = false;
+            render();
+          });
+        };
+      }
+      var proxyToggleBtn = widget.querySelector('#sdm-proxy-toggle-btn');
+      if (proxyToggleBtn) {
+        proxyToggleBtn.onclick = function () {
+          if (state.proxyEnabled !== false) {
+            controller.disableProxy();
+          } else {
+            controller.enableProxy();
+          }
+          render();
+        };
+      }
+      var checkboxes = widget.querySelectorAll('.sdm-rule-checkbox');
+      for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].onchange = function (e) {
+          var id = e.target.getAttribute('data-rule-id');
+          controller.toggleRule(id);
+          render();
+        };
+      }
+    }
+    doc.body.appendChild(widget);
+    render();
+    return {
+      update: function update() {
+        render();
+      },
+      show: function show() {
+        widget.style.display = 'block';
+      },
+      hide: function hide() {
+        widget.style.display = 'none';
+      },
+      destroy: function destroy() {
+        if (widget && widget.parentNode) {
+          widget.parentNode.removeChild(widget);
+        }
+      }
+    };
+  }
+  function delay(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+  function applyUrlRewrite(url, rule) {
+    var req = rule.request || {};
+    if (req.redirectUrl) return req.redirectUrl;
+    var rw = req.urlRewrite || req.urlModify;
+    if (rw && rw.find) {
+      try {
+        return url.split(rw.find).join(rw.replace || '');
+      } catch (e) {
+        return url;
+      }
+    }
+    return url;
+  }
+  function applyRequestBody(originalBodyStr, rule) {
+    var body = rule.request && rule.request.body;
+    if (!body || !body.enabled) return originalBodyStr;
+    var mode = body.mode || body.action || 'replace';
+    try {
+      if (mode === 'merge-json' || mode === 'merge') {
+        var target = safeParse(originalBodyStr, {}) || {};
+        var delta = safeParse(body.mergeValue || body.value, {});
+        return JSON.stringify(deepMerge(target, delta));
+      }
+      if (mode === 'delete') {
+        return '';
+      }
+      var val = body.value != null && body.value !== '' ? body.value : body.mergeValue;
+      return val != null ? String(val) : originalBodyStr;
+    } catch (e) {
+      log.warn('request body transform failed, using original:', e && e.message);
+      return originalBodyStr;
+    }
+  }
+  function applyResponseBody(originalBodyStr, rule) {
+    var body = rule.response && rule.response.body;
+    if (!body || !body.enabled) return originalBodyStr;
+    try {
+      if (body.mode === 'replace' || body.mode === 'mock') {
+        return body.value != null ? String(body.value) : originalBodyStr;
+      }
+      if (body.mode === 'merge-json') {
+        var target = safeParse(originalBodyStr, {}) || {};
+        var delta = safeParse(body.mergeValue || body.value, {});
+        return JSON.stringify(deepMerge(target, delta));
+      }
+      if (body.mode === 'js-transform' && body.jsTransform) {
+        var fn = new Function('response', body.jsTransform);
+        var parsed = safeParse(originalBodyStr, originalBodyStr);
+        var result = fn(parsed);
+        return typeof result === 'string' ? result : JSON.stringify(result);
+      }
+    } catch (e) {
+      log.warn('response body transform failed, using original:', e && e.message);
+    }
+    return originalBodyStr;
+  }
+  function installInterceptors(state) {
+    var win = state.window;
+    var originals = state.originals;
+    if (_typeof(win) === 'object' && win) {
+      win.__superDebugOriginalFetch = originals.fetch;
+    }
+    if (typeof win.fetch === 'function') {
+      win.fetch = function patchedFetch(input, init) {
+        if (state.proxyEnabled === false) {
+          return originals.fetch.call(win, input, init);
+        }
+        var url = typeof input === 'string' ? input : input && input.url;
+        var method = init && init.method || input && input.method || 'GET';
+        if (typeof url === 'string' && (url.indexOf('/proxy') !== -1 || url.indexOf('/public/') !== -1 || url.indexOf('/health') !== -1 || url.indexOf('/auth/') !== -1)) {
+          return originals.fetch.call(win, input, init);
+        }
+        var matched;
+        try {
+          matched = getMatchingRules(state.rules, url, method);
+        } catch (e) {
+          matched = [];
+        }
+        if (!matched.length) return originals.fetch.call(win, input, init);
+        return runFetch(url, method, input, init, matched);
+      };
+    }
+    function runFetch(url, method, input, init, matched) {
+      var opts = Object.assign({}, init);
+      var finalUrl = url;
+      var blocked = false;
+      var maxDelay = 0;
+      matched.forEach(function (rule) {
+        if (rule.block) blocked = true;
+        finalUrl = applyUrlRewrite(finalUrl, rule);
+        if (rule.request && typeof rule.request.delay === 'number') {
+          maxDelay = Math.max(maxDelay, rule.request.delay);
+        }
+        if (rule.request && rule.request.body && rule.request.body.enabled) {
+          var reqMethod = String(init && init.method || _typeof(input) === 'object' && input.method || opts.method || 'GET').toUpperCase();
+          if (reqMethod !== 'GET' && reqMethod !== 'HEAD') {
+            var origBody = opts.body != null ? String(opts.body) : init && init.body || '';
+            opts.body = applyRequestBody(origBody, rule);
+          }
+        }
+      });
+      if (blocked) {
+        log.info('Blocked (fetch):', finalUrl);
+        return Promise.reject(new TypeError('Blocked by Super Debug SDK rule'));
+      }
+      var mockRule = null;
+      matched.forEach(function (rule) {
+        var b = rule.response && rule.response.body;
+        if (b && b.enabled && (b.mode === 'mock' || b.mode === 'replace') && b.value != null) {
+          mockRule = rule;
+        }
+      });
+      if (mockRule) {
+        var mb = mockRule.response.body;
+        var mockStart = maxDelay > 0 ? delay(maxDelay) : Promise.resolve();
+        return mockStart.then(function () {
+          log.info('Mocked (fetch):', finalUrl);
+          return new Response(String(mb.value), {
+            status: typeof mb.statusCode === 'number' ? mb.statusCode : 200,
+            statusText: 'OK',
+            headers: {
+              'Content-Type': mb.contentType || 'application/json'
+            }
+          });
+        });
+      }
+      var start = maxDelay > 0 ? delay(maxDelay) : Promise.resolve();
+      return start.then(function () {
+        var target = finalUrl !== url && typeof input !== 'string' ? finalUrl : finalUrl !== url ? finalUrl : input;
+        return originals.fetch.call(win, target, opts);
+      }).then(function (response) {
+        return transformFetchResponse(response, matched);
+      });
+    }
+    function transformFetchResponse(response, matched) {
+      var needsBody = matched.some(function (r) {
+        return r.response && r.response.body && r.response.body.enabled;
+      });
+      var statusOverride = null;
+      matched.forEach(function (r) {
+        if (r.response && r.response.body && r.response.body.enabled && typeof r.response.body.statusCode === 'number') {
+          statusOverride = r.response.body.statusCode;
+        }
+      });
+      if (!needsBody && statusOverride === null) return response;
+      return response.clone().text().then(function (text) {
+        var out = text;
+        matched.forEach(function (rule) {
+          out = applyResponseBody(out, rule);
+        });
+        var headers = new Headers(response.headers);
+        var init = {
+          status: statusOverride !== null ? statusOverride : response.status,
+          statusText: response.statusText,
+          headers: headers
+        };
+        return new Response(out, init);
+      }).catch(function () {
+        return response;
+      });
+    }
+    if (typeof win.XMLHttpRequest === 'function') {
+      var OrigXHR = originals.XMLHttpRequest;
+      var open = OrigXHR.prototype.open;
+      var send = OrigXHR.prototype.send;
+      OrigXHR.prototype.open = function (method, url) {
+        if (state.proxyEnabled === false) {
+          this.__sdm = null;
+          return open.apply(this, arguments);
+        }
+        this.__sdm = {
+          method: method,
+          url: url,
+          matched: []
+        };
+        try {
+          this.__sdm.matched = getMatchingRules(state.rules, url, method);
+        } catch (e) {
+          this.__sdm.matched = [];
+        }
+        var finalUrl = url;
+        this.__sdm.matched.forEach(function (rule) {
+          finalUrl = applyUrlRewrite(finalUrl, rule);
+        });
+        this.__sdm.finalUrl = finalUrl;
+        var args = Array.prototype.slice.call(arguments);
+        args[1] = finalUrl;
+        return open.apply(this, args);
+      };
+      OrigXHR.prototype.send = function (body) {
+        if (state.proxyEnabled === false) {
+          return send.call(this, body);
+        }
+        var sdm = this.__sdm;
+        if (!sdm || !sdm.matched.length) return send.call(this, body);
+        if (sdm.matched.some(function (r) {
+          return r.block;
+        })) {
+          log.info('Blocked (xhr):', sdm.finalUrl);
+          var self = this;
+          setTimeout(function () {
+            if (typeof self.onerror === 'function') self.onerror(new Event('error'));
+            self.dispatchEvent(new Event('error'));
+          }, 0);
+          return;
+        }
+        var outBody = body;
+        var xhrMethod = String(sdm.method || 'GET').toUpperCase();
+        if (xhrMethod !== 'GET' && xhrMethod !== 'HEAD') {
+          sdm.matched.forEach(function (rule) {
+            if (rule.request && rule.request.body && rule.request.body.enabled) {
+              outBody = applyRequestBody(body != null ? String(body) : '', rule);
+            }
+          });
+        }
+        installXhrResponseTransform(this, sdm.matched);
+        var maxDelay = 0;
+        sdm.matched.forEach(function (rule) {
+          if (rule.request && typeof rule.request.delay === 'number') {
+            maxDelay = Math.max(maxDelay, rule.request.delay);
+          }
+        });
+        var self2 = this;
+        if (maxDelay > 0) {
+          setTimeout(function () {
+            send.call(self2, outBody);
+          }, maxDelay);
+        } else {
+          send.call(this, outBody);
+        }
+      };
+    }
+    function installXhrResponseTransform(xhr, matched) {
+      var wantsBody = matched.some(function (r) {
+        return r.response && r.response.body && r.response.body.enabled;
+      });
+      if (!wantsBody) return;
+      var realGetResponse = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(xhr), 'responseText');
+      xhr.addEventListener('readystatechange', function () {
+        if (xhr.readyState === 4) {
+          try {
+            var original = realGetResponse && realGetResponse.get ? realGetResponse.get.call(xhr) : xhr.responseText;
+            var out = original;
+            matched.forEach(function (rule) {
+              out = applyResponseBody(out, rule);
+            });
+            Object.defineProperty(xhr, 'responseText', {
+              value: out,
+              configurable: true
+            });
+            Object.defineProperty(xhr, 'response', {
+              value: out,
+              configurable: true
+            });
+          } catch (e) {
+            log.warn('xhr response transform failed:', e && e.message);
+          }
+        }
+      });
+    }
+    if (win.navigator && typeof win.navigator.sendBeacon === 'function') {
+      win.navigator.sendBeacon = function patchedBeacon(url, data) {
+        if (state.proxyEnabled === false) {
+          return originals.sendBeacon.call(win.navigator, url, data);
+        }
+        var matched;
+        try {
+          matched = getMatchingRules(state.rules, url, 'POST');
+        } catch (e) {
+          matched = [];
+        }
+        if (!matched.length) return originals.sendBeacon.call(win.navigator, url, data);
+        if (matched.some(function (r) {
+          return r.block;
+        })) {
+          log.info('Blocked (beacon):', url);
+          return true;
+        }
+        var finalUrl = url;
+        var outData = data;
+        matched.forEach(function (rule) {
+          finalUrl = applyUrlRewrite(finalUrl, rule);
+          if (rule.request && rule.request.body && rule.request.body.enabled && typeof data === 'string') {
+            outData = applyRequestBody(data, rule);
+          }
+        });
+        return originals.sendBeacon.call(win.navigator, finalUrl, outData);
+      };
+    }
+    log.info('Interceptors installed');
+  }
+  var __BAKED_SERVER_URL__ = "";
+  var __BAKED_SDK_VERSION__ = "2.0.1";
+  var SDK_VERSION = typeof __BAKED_SDK_VERSION__ !== 'undefined' && __BAKED_SDK_VERSION__.indexOf('__') !== 0 ? __BAKED_SDK_VERSION__ : '2.0.1';
+  function resolveDefaultServerUrl() {
+    if (typeof window !== 'undefined' && window.__SUPERDEBUG_SERVER_URL__) {
+      return window.__SUPERDEBUG_SERVER_URL__;
+    }
+    try {
+      var stored = typeof window !== 'undefined' && localStorage.getItem('sdm_server_url');
+      if (stored) return stored;
+    } catch (e) {}
+    if (__BAKED_SERVER_URL__ && __BAKED_SERVER_URL__.indexOf('__') !== 0) {
+      return __BAKED_SERVER_URL__;
+    }
+    if (typeof window !== 'undefined' && window.location && window.location.origin) {
+      return window.location.origin;
+    }
+    return '';
+  }
+  var DEFAULT_SERVER_URL = resolveDefaultServerUrl();
+  var state = {
+    window: typeof window !== 'undefined' ? window : typeof self !== 'undefined' ? self : {},
+    originals: null,
+    rules: [],
+    installed: false,
+    timer: null,
+    config: null,
+    proxyEnabled: true,
+    ui: null
+  };
+  function captureOriginals(win) {
+    return {
+      fetch: typeof win.fetch === 'function' ? win.fetch.bind(win) : null,
+      XMLHttpRequest: win.XMLHttpRequest,
+      sendBeacon: win.navigator && typeof win.navigator.sendBeacon === 'function' ? win.navigator.sendBeacon : null
+    };
+  }
+  function findRule(ruleId) {
+    if (!ruleId && ruleId !== 0) return null;
+    for (var i = 0; i < state.rules.length; i++) {
+      var r = state.rules[i];
+      if (r && (r.id === ruleId || r._id === ruleId || String(r.id) === String(ruleId) || String(i) === String(ruleId))) {
+        return r;
+      }
+    }
+    return null;
+  }
+  var controller = {
+    getAllRules: function getAllRules() {
+      return state.rules.slice();
+    },
+    getRules: function getRules() {
+      return state.rules.slice();
+    },
+    getRule: function getRule(ruleId) {
+      return findRule(ruleId);
+    },
+    disableProxy: function disableProxy() {
+      state.proxyEnabled = false;
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      log.info('Proxy interception disabled');
+      return false;
+    },
+    enableProxy: function enableProxy() {
+      state.proxyEnabled = true;
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      log.info('Proxy interception enabled');
+      return true;
+    },
+    isProxyEnabled: function isProxyEnabled() {
+      return state.proxyEnabled !== false;
+    },
+    toggleRule: function toggleRule(ruleId) {
+      var r = findRule(ruleId);
+      if (!r) {
+        log.warn('toggleRule: rule not found for ID', ruleId);
+        return null;
+      }
+      r.enabled = r.enabled === false ? true : false;
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      log.info('Rule ' + ruleId + ' toggled to:', r.enabled);
+      return r;
+    },
+    enableRule: function enableRule(ruleId) {
+      var r = findRule(ruleId);
+      if (!r) {
+        log.warn('enableRule: rule not found for ID', ruleId);
+        return null;
+      }
+      r.enabled = true;
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      log.info('Rule ' + ruleId + ' enabled');
+      return r;
+    },
+    disableRule: function disableRule(ruleId) {
+      var r = findRule(ruleId);
+      if (!r) {
+        log.warn('disableRule: rule not found for ID', ruleId);
+        return null;
+      }
+      r.enabled = false;
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      log.info('Rule ' + ruleId + ' disabled');
+      return r;
+    },
+    addRule: function addRule(rule) {
+      if (!rule) return null;
+      if (!rule.id && !rule._id) rule.id = 'rule_client_' + Date.now();
+      if (typeof rule.enabled === 'undefined') rule.enabled = true;
+      state.rules.push(rule);
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      return rule;
+    },
+    removeRule: function removeRule(ruleId) {
+      var idx = -1;
+      for (var i = 0; i < state.rules.length; i++) {
+        var r = state.rules[i];
+        if (r && (r.id === ruleId || r._id === ruleId || String(r.id) === String(ruleId) || String(i) === String(ruleId))) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx === -1) return false;
+      state.rules.splice(idx, 1);
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      return true;
+    },
+    setRules: function setRules(rules) {
+      state.rules = Array.isArray(rules) ? rules : [];
+      if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+      return state.rules.slice();
+    },
+    refresh: function refresh() {
+      return SuperDebug.refresh();
+    },
+    loadAllRules: function loadAllRules() {
+      log.info('loadAllRules() called — forcing full cloud rule re-fetch');
+      return SuperDebug.refresh().then(function (result) {
+        if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+        return result;
+      });
+    },
+    showUI: function showUI() {
+      if (!state.ui) {
+        state.ui = initFloatingUI(state, controller);
+      }
+      if (state.ui && typeof state.ui.show === 'function') {
+        state.ui.show();
+      }
+    },
+    hideUI: function hideUI() {
+      if (state.ui && typeof state.ui.hide === 'function') {
+        state.ui.hide();
+      }
+    },
+    destroy: function destroy() {
+      if (state.timer) clearInterval(state.timer);
+      state.timer = null;
+      if (state.ui && typeof state.ui.destroy === 'function') {
+        state.ui.destroy();
+        state.ui = null;
+      }
+      if (state.installed && state.originals) {
+        var win = state.window;
+        if (state.originals.fetch) win.fetch = state.originals.fetch;
+        if (state.originals.XMLHttpRequest) win.XMLHttpRequest = state.originals.XMLHttpRequest;
+        if (state.originals.sendBeacon && win.navigator) {
+          win.navigator.sendBeacon = state.originals.sendBeacon;
+        }
+      }
+      state.installed = false;
+      state.rules = [];
+      log.info('SDK destroyed, originals restored');
+    },
+    getServerUrl: function getServerUrl() {
+      return state.config && state.config.serverBaseUrl || DEFAULT_SERVER_URL;
+    },
+    getOriginalFetch: function getOriginalFetch() {
+      return state.originals && state.originals.fetch || (typeof window !== 'undefined' ? window.fetch : null);
+    },
+    version: SDK_VERSION
+  };
+  var SuperDebug = {
+    init: function init(options) {
+      options = options || {};
+      setDebug(options.debug);
+      if (options.window) {
+        state.window = options.window;
+      } else if (typeof window !== 'undefined') {
+        state.window = window;
+      } else if (typeof self !== 'undefined') {
+        state.window = self;
+      }
+      if (!options.apiKey && !(options.rules && options.rules.length)) {
+        log.warn('init() called without an apiKey — using local or pre-seeded rules.');
+      }
+      var serverBaseUrl = options.serverUrl || options.serverBaseUrl || DEFAULT_SERVER_URL;
+      state.proxyEnabled = typeof options.enableProxy === 'boolean' ? options.enableProxy : true;
+      state.config = {
+        apiKey: options.apiKey || null,
+        serverBaseUrl: serverBaseUrl,
+        refreshInterval: typeof options.refreshInterval === 'number' ? options.refreshInterval : 300000,
+        includeDisabled: Boolean(options.includeDisabled),
+        showUI: Boolean(options.showUI)
+      };
+      if (Array.isArray(options.rules)) state.rules = options.rules;
+      if (!state.installed) {
+        state.originals = captureOriginals(state.window);
+        installInterceptors(state);
+        state.installed = true;
+      }
+      if (state.config.showUI) {
+        state.ui = initFloatingUI(state, controller);
+      }
+      var refresh = SuperDebug.refresh.bind(SuperDebug);
+      var first = state.config.apiKey ? refresh() : Promise.resolve({
+        rules: state.rules
+      });
+      if (state.config.apiKey && state.config.refreshInterval > 0) {
+        if (state.timer) clearInterval(state.timer);
+        state.timer = setInterval(refresh, state.config.refreshInterval);
+      }
+      if (typeof window !== 'undefined') {
+        window.superDebugObj = controller;
+      }
+      var instance = Object.create(controller);
+      instance.ready = first;
+      instance.then = function (onFulfilled, onRejected) {
+        return first.then(function (res) {
+          return onFulfilled ? onFulfilled(res) : res;
+        }, onRejected);
+      };
+      instance.catch = function (onRejected) {
+        return first.catch(onRejected);
+      };
+      return instance;
+    },
+    refresh: function refresh() {
+      if (!state.config || !state.config.apiKey) {
+        return Promise.resolve({
+          rules: state.rules
+        });
+      }
+      var orig = state.originals && state.originals.fetch || state.window.fetch.bind(state.window);
+      return fetchRules(orig, state.config.serverBaseUrl, state.config.apiKey, state.config.includeDisabled).then(function (rules) {
+        if (rules !== null) state.rules = rules;
+        if (state.ui && typeof state.ui.update === 'function') state.ui.update();
+        return {
+          rules: state.rules
+        };
+      });
+    },
+    version: SDK_VERSION
+  };
+  Object.keys(controller).forEach(function (key) {
+    if (typeof controller[key] === 'function' && !SuperDebug[key]) {
+      SuperDebug[key] = controller[key];
+    }
+  });
+  SuperDebug.DEFAULT_SERVER_URL = DEFAULT_SERVER_URL;
+  SuperDebug.version = SDK_VERSION;
+  if (typeof window !== 'undefined') {
+    window.SuperDebug = SuperDebug;
+  }
+  __SDK_DEFAULT__ = SuperDebug;
+  return __SDK_DEFAULT__;
+});

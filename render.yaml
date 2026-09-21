@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: proxytea-backend
+    env: node
+    plan: free
+    region: oregon
+    branch: PRODUCTION_DEPLOY
+    buildCommand: npm install --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SERVER_BASE_PATH
+        sync: false
+      - key: PRODUCTION_DOMAIN
+        value: https://proxytea.hatchable.site,https://proxytea.com

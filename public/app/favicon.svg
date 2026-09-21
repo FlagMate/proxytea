@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="ProxyTea">
+  <defs>
+    <linearGradient id="pt-grad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="0.5" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="pt-steam" x1="32" y1="6" x2="32" y2="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded app-icon background -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="#0d121d"/>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#pt-grad)" opacity="0.14"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="14.25" fill="none" stroke="url(#pt-grad)" stroke-width="1.5" opacity="0.55"/>
+
+  <!-- steam: two rising "proxy flow" wisps -->
+  <path d="M26 21c0-4-3-4-3-8s3-4 3-8" fill="none" stroke="url(#pt-steam)" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M38 21c0-4 3-4 3-8s-3-4-3-8" fill="none" stroke="url(#pt-steam)" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- teacup body -->
+  <path d="M18 26h24v6c0 8.5-5.4 14-12 14s-12-5.5-12-14z" fill="url(#pt-grad)"/>
+  <!-- cup inner rim highlight -->
+  <path d="M18 26h24v3H18z" fill="#ffffff" opacity="0.22"/>
+  <!-- handle -->
+  <path d="M42 29h3.5a5.5 5.5 0 0 1 0 11H41" fill="none" stroke="url(#pt-grad)" stroke-width="3.4" stroke-linecap="round"/>
+
+  <!-- saucer -->
+  <rect x="14" y="49" width="32" height="3.4" rx="1.7" fill="url(#pt-grad)"/>
+</svg>
