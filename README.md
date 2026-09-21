@@ -13,3 +13,7 @@ This branch (`PRODUCTION_DEPLOY`) is automatically tracked by Render.
    - `MONGODB_URI`: Your production MongoDB connection string (e.g. MongoDB Atlas).
    - `JWT_SECRET`: Secure random string for JWT signing.
    - `PRODUCTION_DOMAIN`: Comma-separated allowed frontend domains (e.g. `https://proxytea.hatchable.site`).
+
+---
+- **Maintainer**: FlagMate <flagmate.app@gmail.com>
+- **CI/CD Pipeline**: Render Web Service (Branch `PRODUCTION_DEPLOY`)
