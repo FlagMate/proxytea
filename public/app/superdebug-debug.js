@@ -371,7 +371,59 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
         return url;
       }
     }
-    return url;
+  }
+
+  /** Apply request header modifications configured in the rule, supporting $ORIGINAL_URL substitution. */
+  function applyRequestHeaders(headersInput, rule, originalUrl) {
+    var headerOps = Array.isArray(rule.request && rule.request.headers) ? rule.request.headers : rule.request && rule.request.headers && rule.request.headers.modify;
+    if (!Array.isArray(headerOps) || !headerOps.length) return headersInput;
+    if (typeof Headers !== 'undefined' && headersInput instanceof Headers) {
+      headerOps.forEach(function (op) {
+        if (!op || !op.name) return;
+        if (op.op === 'remove') {
+          headersInput.delete(op.name);
+        } else {
+          var val = String(op.value != null ? op.value : '');
+          if (val === '$ORIGINAL_URL' || val === '$URL' || val === '{{url}}') {
+            val = originalUrl;
+          }
+          headersInput.set(op.name, val);
+        }
+      });
+      return headersInput;
+    }
+    var out = {};
+    if (headersInput && _typeof(headersInput) === 'object') {
+      if (Array.isArray(headersInput)) {
+        headersInput.forEach(function (pair) {
+          if (pair && pair[0]) out[pair[0]] = pair[1];
+        });
+      } else {
+        for (var k in headersInput) {
+          if (Object.prototype.hasOwnProperty.call(headersInput, k)) {
+            out[k] = headersInput[k];
+          }
+        }
+      }
+    }
+    headerOps.forEach(function (op) {
+      if (!op || !op.name) return;
+      var nameLower = op.name.toLowerCase();
+      if (op.op === 'remove') {
+        for (var existingKey in out) {
+          if (existingKey.toLowerCase() === nameLower) {
+            delete out[existingKey];
+          }
+        }
+      } else {
+        var val = String(op.value != null ? op.value : '');
+        if (val === '$ORIGINAL_URL' || val === '$URL' || val === '{{url}}') {
+          val = originalUrl;
+        }
+        out[op.name] = val;
+      }
+    });
+    return out;
   }
 
   /** Compute the request body to send, given the original body string. */
@@ -472,6 +524,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
       matched.forEach(function (rule) {
         if (rule.block) blocked = true;
         finalUrl = applyUrlRewrite(finalUrl, rule);
+        opts.headers = applyRequestHeaders(opts.headers, rule, url);
         if (rule.request && typeof rule.request.delay === 'number') {
           maxDelay = Math.max(maxDelay, rule.request.delay);
         }
@@ -484,6 +537,27 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
           }
         }
       });
+
+      // Auto-inject x-target-url if rewritten to /mitm and header not explicitly set
+      if (typeof finalUrl === 'string' && finalUrl.indexOf('/mitm') !== -1) {
+        if (typeof Headers !== 'undefined' && opts.headers instanceof Headers) {
+          if (!opts.headers.has('x-target-url')) {
+            opts.headers.set('x-target-url', url);
+          }
+        } else {
+          opts.headers = opts.headers || {};
+          var hasTargetHeader = false;
+          for (var hk in opts.headers) {
+            if (hk.toLowerCase() === 'x-target-url') {
+              hasTargetHeader = true;
+              break;
+            }
+          }
+          if (!hasTargetHeader) {
+            opts.headers['x-target-url'] = url;
+          }
+        }
+      }
       if (blocked) {
         log.info('Blocked (fetch):', finalUrl);
         return Promise.reject(new TypeError('Blocked by Super Debug SDK rule'));
@@ -555,6 +629,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
       var OrigXHR = originals.XMLHttpRequest;
       var open = OrigXHR.prototype.open;
       var send = OrigXHR.prototype.send;
+      var setRequestHeader = OrigXHR.prototype.setRequestHeader;
       OrigXHR.prototype.open = function (method, url) {
         if (state.proxyEnabled === false) {
           this.__sdm = null;
@@ -590,12 +665,37 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
         })) {
           log.info('Blocked (xhr):', sdm.finalUrl);
           // Emulate a network error without hitting the server.
-          var self = this;
+          var selfBlocked = this;
           setTimeout(function () {
-            if (typeof self.onerror === 'function') self.onerror(new Event('error'));
-            self.dispatchEvent(new Event('error'));
+            if (typeof selfBlocked.onerror === 'function') selfBlocked.onerror(new Event('error'));
+            selfBlocked.dispatchEvent(new Event('error'));
           }, 0);
           return;
+        }
+
+        // Request header modifications on XHR
+        var self = this;
+        sdm.matched.forEach(function (rule) {
+          var headerOps = Array.isArray(rule.request && rule.request.headers) ? rule.request.headers : rule.request && rule.request.headers && rule.request.headers.modify;
+          if (Array.isArray(headerOps)) {
+            headerOps.forEach(function (op) {
+              if (!op || !op.name || op.op === 'remove') return;
+              var val = String(op.value != null ? op.value : '');
+              if (val === '$ORIGINAL_URL' || val === '$URL' || val === '{{url}}') {
+                val = sdm.url;
+              }
+              try {
+                setRequestHeader.call(self, op.name, val);
+              } catch (e) {}
+            });
+          }
+        });
+
+        // Auto-inject x-target-url if rewritten to /mitm
+        if (typeof sdm.finalUrl === 'string' && sdm.finalUrl.indexOf('/mitm') !== -1) {
+          try {
+            setRequestHeader.call(self, 'x-target-url', sdm.url);
+          } catch (e) {}
         }
 
         // request body transform (only for non-GET/HEAD methods)

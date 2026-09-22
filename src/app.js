@@ -9,11 +9,16 @@ const ruleRoutes = require('./routes/rules');
 const apiKeyRoutes = require('./routes/apiKeys');
 const publicRoutes = require('./routes/public');
 const proxyRoutes = require('./routes/proxy');
+const mitmRoutes = require('./routes/mitm');
 const { notFound, errorHandler } = require('./middleware/error');
 const { mongoose } = require('./config/db');
 
 function createApp() {
   const app = express();
+
+  // Transparent Server-Side MITM Reverse Proxy Route (accepts x-target-url or ?url=)
+  // Mounted before global express.json() to preserve raw streams & binary buffers.
+  app.use(['/mitm', '/mitm/*', '/api/mitm', '/api/mitm/*', '/server/mitm', '/server/mitm/*'], mitmRoutes);
 
   app.use(express.json({ limit: '5mb' }));
 
