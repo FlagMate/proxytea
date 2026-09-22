@@ -25,6 +25,9 @@ const Rule = require('../models/Rule');
 const Workspace = require('../models/Workspace');
 const { toProxyRule } = require('../lib/ruleSchema');
 const { processServerMitm, delay } = require('../lib/mitm');
+const { isM3u8, rewriteM3u8ToAbsolute } = require('../lib/m3u8');
+
+const SDM_VERSION = require('../../package.json').version;
 
 const router = express.Router();
 
@@ -50,7 +53,9 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Expose-Headers', '*');
+  res.setHeader('x-sdm-version', SDM_VERSION);
 }
+
 
 async function resolveApiKeyAndRules(rawKey) {
   if (!rawKey || typeof rawKey !== 'string') return [];
@@ -181,6 +186,13 @@ router.all('*', async (req, res) => {
         rules,
       });
 
+      // Track matched rule IDs for debug header (set after applyCors below)
+      if (mitmPlan.matched && mitmPlan.matched.length > 0) {
+        mitmPlan._triggeredRuleIds = mitmPlan.matched
+          .map(r => r.id || r._id || r.name || 'unknown')
+          .join(',');
+      }
+
       if (mitmPlan.isBlocked) {
         applyCors(req, res);
         res.setHeader('x-sdm-mitm', 'blocked');
@@ -226,6 +238,9 @@ router.all('*', async (req, res) => {
     const upstreamRes = await fetch(upstreamTarget, fetchOpts);
 
     applyCors(req, res);
+    if (mitmPlan?._triggeredRuleIds) {
+      res.setHeader('x-sdm-triggered-rules', mitmPlan._triggeredRuleIds);
+    }
 
     // Forward upstream response headers (strip content-encoding since fetch automatically decompresses body)
     upstreamRes.headers.forEach((val, key) => {
@@ -241,8 +256,29 @@ router.all('*', async (req, res) => {
       await delay(mitmPlan.postDelay);
     }
 
-    // Apply response transforms if rules defined them
-    if (mitmPlan && mitmPlan.transformResponse) {
+    // Detect M3U8 upfront — must happen before any early return so rewriting
+    // is applied regardless of whether a transformResponse rule is active.
+    const upstreamContentType = upstreamRes.headers.get('content-type') || '';
+    const finalUrl = upstreamRes.url || upstreamTarget; // url after any CDN redirects
+    const needsM3u8Rewrite = isM3u8(upstreamContentType, upstreamTarget) || isM3u8(upstreamContentType, finalUrl);
+    const m3u8BaseUrl = finalUrl || upstreamTarget;
+
+    // Classify content type — binary media must never be buffered as text
+    const ctLower = upstreamContentType.toLowerCase();
+    const isBinary = (
+      ctLower.startsWith('video/') ||
+      ctLower.startsWith('audio/') ||
+      ctLower.includes('octet-stream') ||
+      ctLower.includes('mp4') ||
+      ctLower.includes('m4s') ||
+      ctLower.includes('iso.segment') ||
+      ctLower.includes('mpeg') && !ctLower.includes('mpegurl') // mpegurl = m3u8 text
+    );
+
+    // Apply response transforms ONLY when:
+    //  1. rules actually matched this URL (not a passthrough)
+    //  2. content is NOT binary media (binary would be corrupted by text buffering)
+    if (mitmPlan && mitmPlan.matched?.length > 0 && mitmPlan.transformResponse && !isBinary && !needsM3u8Rewrite) {
       const text = await upstreamRes.text();
       const upstreamHeaders = {};
       upstreamRes.headers.forEach((v, k) => { upstreamHeaders[k] = v; });
@@ -250,7 +286,32 @@ router.all('*', async (req, res) => {
       try { rawData = JSON.parse(text); } catch {}
       const transformed = mitmPlan.transformResponse(upstreamRes.status, upstreamRes.statusText, upstreamHeaders, rawData);
       res.status(transformed.status || upstreamRes.status);
-      return res.send(typeof transformed.data === 'string' ? transformed.data : JSON.stringify(transformed.data));
+      const responseBody = typeof transformed.data === 'string' ? transformed.data : JSON.stringify(transformed.data);
+      return res.send(responseBody);
+    }
+
+    // Apply transformResponse for M3U8 separately (text but needs URI rewriting after transform)
+    if (mitmPlan && mitmPlan.matched?.length > 0 && mitmPlan.transformResponse && needsM3u8Rewrite) {
+      const text = await upstreamRes.text();
+      const upstreamHeaders = {};
+      upstreamRes.headers.forEach((v, k) => { upstreamHeaders[k] = v; });
+      let rawData = text;
+      const transformed = mitmPlan.transformResponse(upstreamRes.status, upstreamRes.statusText, upstreamHeaders, rawData);
+      res.status(transformed.status || upstreamRes.status);
+      const rawBody = typeof transformed.data === 'string' ? transformed.data : String(transformed.data);
+      const rewritten = rewriteM3u8ToAbsolute(rawBody, m3u8BaseUrl);
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('x-sdm-mitm-m3u8', 'rewritten');
+      return res.send(rewritten);
+    }
+
+    // M3U8: buffer, rewrite relative URIs to absolute, then send as text
+    if (needsM3u8Rewrite) {
+      const m3u8Text = await upstreamRes.text();
+      const rewritten = rewriteM3u8ToAbsolute(m3u8Text, m3u8BaseUrl);
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('x-sdm-mitm-m3u8', 'rewritten');
+      return res.send(rewritten);
     }
 
     // Stream raw media chunks/binary directly to caller with zero memory buffering for instant TTFB
