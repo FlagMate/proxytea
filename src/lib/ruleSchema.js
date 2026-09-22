@@ -51,8 +51,8 @@ function normalizeRule(raw) {
     priority: typeof raw.priority === 'number' ? raw.priority : null,
 
     match: {
-      urlPattern: '*',
-      matchType: 'wildcard',
+      urlPattern: typeof raw.match?.urlPattern === 'string' ? raw.match.urlPattern.trim() : '*',
+      matchType: raw.match?.matchType || 'wildcard',
       methods: ['*'],
       resourceTypes: ['*'],
       ...(raw.match && typeof raw.match === 'object' ? raw.match : {}),

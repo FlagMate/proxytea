@@ -167,8 +167,8 @@ async function processServerMitm({ url, method, headers = {}, body, rules = [] }
       blockReason = `Blocked by rule: "${rule.name}"`;
     }
 
-    // URL rewrite / redirect
-    if (rule.request?.redirectUrl) {
+    // URL rewrite / redirect (ignore self-referential /mitm endpoints to prevent loop)
+    if (rule.request?.redirectUrl && !rule.request.redirectUrl.includes('/mitm')) {
       targetUrl = rule.request.redirectUrl;
     }
     const rw = rule.request?.urlRewrite || rule.request?.urlModify;

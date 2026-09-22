@@ -19,7 +19,7 @@ const headerOpSchema = new mongoose.Schema(
 
 const matchSchema = new mongoose.Schema(
   {
-    urlPattern: { type: String, default: '*' },
+    urlPattern: { type: String, default: '*', trim: true },
     matchType: { type: String, default: 'wildcard' }, // wildcard | regex
     methods: { type: [String], default: ['*'] },
     resourceTypes: { type: [String], default: ['*'] },

@@ -230,10 +230,10 @@ router.all('*', async (req, res) => {
 
     applyCors(req, res);
 
-    // Forward upstream response headers
+    // Forward upstream response headers (strip content-encoding since fetch automatically decompresses body)
     upstreamRes.headers.forEach((val, key) => {
       const lower = key.toLowerCase();
-      if (!HOP_BY_HOP_HEADERS.has(lower) && !lower.startsWith('access-control-')) {
+      if (!HOP_BY_HOP_HEADERS.has(lower) && !lower.startsWith('access-control-') && lower !== 'content-encoding') {
         res.setHeader(key, val);
       }
     });
