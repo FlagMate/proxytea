@@ -46,14 +46,10 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 function applyCors(req, res) {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Expose-Headers', '*');
-  if (req.headers.origin) {
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
 }
 
 async function resolveApiKeyAndRules(rawKey) {

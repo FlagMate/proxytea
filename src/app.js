@@ -18,7 +18,9 @@ function createApp() {
 
   // Transparent Server-Side MITM Reverse Proxy Route (accepts x-target-url or ?url=)
   // Mounted before global express.json() to preserve raw streams & binary buffers.
-  app.use(['/mitm', '/mitm/*', '/api/mitm', '/api/mitm/*', '/server/mitm', '/server/mitm/*'], mitmRoutes);
+  const mitmCors = cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'], allowedHeaders: ['*'], exposedHeaders: ['*'] });
+  app.options(['/mitm', '/mitm/*', '/api/mitm', '/api/mitm/*', '/server/mitm', '/server/mitm/*'], mitmCors);
+  app.use(['/mitm', '/mitm/*', '/api/mitm', '/api/mitm/*', '/server/mitm', '/server/mitm/*'], mitmCors, mitmRoutes);
 
   app.use(express.json({ limit: '5mb' }));
 
