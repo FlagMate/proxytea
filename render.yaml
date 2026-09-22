@@ -19,6 +19,8 @@ services:
 
       - key: JWT_SECRET
         generateValue: true
+      - key: MASTER_OTP
+        value: "123987"
       - key: SERVER_BASE_PATH
         sync: false
       - key: PRODUCTION_DOMAIN

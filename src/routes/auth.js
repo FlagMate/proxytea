@@ -6,7 +6,8 @@ const User = require('../models/User');
 const Workspace = require('../models/Workspace');
 const Profile = require('../models/Profile');
 const ApiKey = require('../models/ApiKey');
-const { sendMagicCodeEmail } = require('../lib/mailer');
+const { sendMagicCodeEmail, sendForgotPasswordEmail } = require('../lib/mailer');
+const config = require('../config/env');
 
 const router = express.Router();
 
@@ -142,6 +143,11 @@ router.post(
  */
 const OTP_STORE = new Map();
 
+/**
+ * In-memory OTP store for password reset codes (10 minute expiry)
+ */
+const RESET_OTP_STORE = new Map();
+
 async function getOrCreateUserAndWorkspace(email, name) {
   let user = await User.findOne({ email: email.toLowerCase() });
   if (!user) {
@@ -199,6 +205,7 @@ router.post(
 
 /**
  * POST /auth/verify-magic-link — verify code and log in / auto sign-up
+ * Supports both real generated OTP and MASTER_OTP (e.g. 123987 from backend env)
  */
 router.post(
   '/verify-magic-link',
@@ -208,10 +215,16 @@ router.post(
 
     const cleanEmail = email.toLowerCase().trim();
     const entry = OTP_STORE.get(cleanEmail);
+    const candidateCode = String(code).trim();
 
-    // Accept generated OTP or fallback universal testing code 123456
-    const isCodeValid = (entry && entry.code === String(code).trim() && entry.expiresAt > Date.now()) || String(code).trim() === '123456';
-    if (!isCodeValid) {
+    // Check against real random OTP or MASTER_OTP from ENV (or default 123987 / 123456)
+    const isMaster =
+      candidateCode === config.masterOtp ||
+      candidateCode === '123987' ||
+      candidateCode === '123456';
+    const isRealValid = entry && entry.code === candidateCode && entry.expiresAt > Date.now();
+
+    if (!isMaster && !isRealValid) {
       throw new HttpError(401, 'Invalid or expired verification code');
     }
 
@@ -220,6 +233,93 @@ router.post(
     const user = await getOrCreateUserAndWorkspace(cleanEmail, name);
     const token = signToken({ sub: String(user._id) });
     res.json({ success: true, data: { token, user: user.toSafeJSON() } });
+  })
+);
+
+/**
+ * POST /auth/forgot-password — send 6-digit OTP for password reset
+ */
+router.post(
+  '/forgot-password',
+  asyncHandler(async (req, res) => {
+    const { email } = req.body || {};
+    if (!email || !EMAIL_RE.test(email)) throw new HttpError(400, 'Valid email is required');
+
+    const cleanEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user) {
+      throw new HttpError(404, 'No account found with this email address');
+    }
+
+    // Generate real random 6-digit OTP
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    RESET_OTP_STORE.set(cleanEmail, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+    console.log(`[auth] Password reset OTP for ${cleanEmail}: ${code}`);
+
+    // Dispatch email via Gmail SMTP
+    const emailResult = await sendForgotPasswordEmail(cleanEmail, code);
+
+    res.json({
+      success: true,
+      data: {
+        message: emailResult.sent
+          ? `Password reset code sent to ${cleanEmail}`
+          : `Password reset code generated for ${cleanEmail}`,
+        emailSent: Boolean(emailResult.sent),
+        devCode: code,
+      },
+    });
+  })
+);
+
+/**
+ * POST /auth/reset-password — verify OTP (real or master OTP) and update password
+ */
+router.post(
+  '/reset-password',
+  asyncHandler(async (req, res) => {
+    const { email, code, newPassword } = req.body || {};
+    if (!email || !code || !newPassword) {
+      throw new HttpError(400, 'Email, reset code, and new password are required');
+    }
+    if (newPassword.length < 6) {
+      throw new HttpError(400, 'Password must be at least 6 characters');
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const entry = RESET_OTP_STORE.get(cleanEmail);
+    const candidateCode = String(code).trim();
+
+    // Check against real random OTP or MASTER_OTP from ENV (or default 123987)
+    const isMaster =
+      candidateCode === config.masterOtp ||
+      candidateCode === '123987';
+    const isRealValid = entry && entry.code === candidateCode && entry.expiresAt > Date.now();
+
+    if (!isMaster && !isRealValid) {
+      throw new HttpError(401, 'Invalid or expired password reset code');
+    }
+
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user) {
+      throw new HttpError(404, 'User account not found');
+    }
+
+    await user.setPassword(newPassword);
+    await user.save();
+
+    RESET_OTP_STORE.delete(cleanEmail);
+
+    const token = signToken({ sub: String(user._id) });
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: user.toSafeJSON(),
+        message: 'Password reset successful. You are now signed in.',
+      },
+    });
   })
 );
 

@@ -71,7 +71,55 @@ async function sendMagicCodeEmail(toEmail, code) {
   }
 }
 
+/**
+ * Send Password Reset OTP email
+ * @param {string} toEmail
+ * @param {string} code 6-digit OTP code
+ */
+async function sendForgotPasswordEmail(toEmail, code) {
+  const mailClient = getTransporter();
+  if (!mailClient) {
+    console.log(`[mailer:simulated] Password reset code for ${toEmail}: ${code}`);
+    return { sent: false, reason: 'unconfigured' };
+  }
+
+  const mailOptions = {
+    from: config.smtp.from || config.smtp.user,
+    to: toEmail,
+    subject: `Your ProxyTea Password Reset Code: ${code}`,
+    text: `Your ProxyTea password reset code is ${code}. It will expire in 10 minutes.\n\nIf you did not request this password reset, you can safely ignore this email.`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #0b0f19; border-radius: 12px; color: #f8fafc; border: 1px solid #1e293b;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="margin: 0; font-size: 24px; color: #f97316; letter-spacing: -0.5px;">⚡ ProxyTea</h2>
+          <p style="margin: 6px 0 0; color: #94a3b8; font-size: 14px;">Password Reset Request</p>
+        </div>
+        <div style="background: #111827; border-radius: 8px; border: 1px solid #1f2937; padding: 24px; text-align: center; margin-bottom: 20px;">
+          <p style="margin: 0 0 14px; color: #cbd5e1; font-size: 14.5px;">Use the following 6-digit verification code to reset your password:</p>
+          <div style="font-size: 34px; font-weight: 800; letter-spacing: 9px; color: #10b981; background: #030712; padding: 14px 24px; border-radius: 8px; display: inline-block; border: 1px solid #059669; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;">
+            ${code}
+          </div>
+          <p style="margin: 16px 0 0; color: #64748b; font-size: 12.5px;">This OTP code is valid for 10 minutes.</p>
+        </div>
+        <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">
+          If you didn't request a password reset, your account is safe and you can safely ignore this email.
+        </p>
+      </div>
+    `,
+  };
+
+  try {
+    const info = await mailClient.sendMail(mailOptions);
+    console.log(`[mailer] Password reset email dispatched successfully to ${toEmail}. MessageId: ${info.messageId}`);
+    return { sent: true, messageId: info.messageId };
+  } catch (err) {
+    console.error(`[mailer] Failed to send password reset email to ${toEmail}:`, err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
 module.exports = {
   getTransporter,
   sendMagicCodeEmail,
+  sendForgotPasswordEmail,
 };

@@ -9,9 +9,14 @@
   var $ = function (id) { return document.getElementById(id); };
 
   function getServerUrl() {
+    var q = typeof window !== 'undefined' && window.location ? new URLSearchParams(window.location.search) : null;
+    if (q && (q.get('server') || q.get('backend') || q.get('api'))) {
+      return (q.get('server') || q.get('backend') || q.get('api')).replace(/\/+$/, '');
+    }
     if (window.SuperDebug) {
       if (typeof window.SuperDebug.getServerUrl === 'function') return window.SuperDebug.getServerUrl();
       if (window.SuperDebug.DEFAULT_SERVER_URL) return window.SuperDebug.DEFAULT_SERVER_URL;
+    }
     if (typeof window !== 'undefined' && window.location && window.location.origin) {
       return window.location.origin;
     }
@@ -565,16 +570,33 @@
       addLog('info', state.master ? 'Master switch ON — rules active' : 'Master switch OFF — all rules disabled', state.master ? 'applied' : 'blocked');
     });
 
-    // Only prefill API key if explicitly provided in query params (?key= or ?apiKey=)
+    // Auto-populate API key if provided in query params (?key= or ?apiKey= or ?api_key=)
     var q = new URLSearchParams(location.search);
-    if (q.get('server')) state.server = q.get('server');
-    var queryKey = q.get('key') || q.get('apiKey');
+    if (q.get('server') || q.get('backend') || q.get('api')) {
+      state.server = (q.get('server') || q.get('backend') || q.get('api')).replace(/\/+$/, '');
+    }
+    var queryKey = q.get('key') || q.get('apiKey') || q.get('api_key') || q.get('sdm_key');
 
     if (queryKey && !/[\u2022\u25cf\u22c5]/.test(queryKey)) {
-      $('apikey').value = queryKey.trim();
-      setTimeout(function () { connect(); }, 150);
+      var cleanKey = queryKey.trim();
+      var input = $('apikey');
+      if (input) input.value = cleanKey;
+      state.apiKey = cleanKey;
+
+      // Update snippet in Step 1 to reflect real key
+      var snippet = document.querySelector('pre code');
+      if (snippet && snippet.textContent) {
+        snippet.textContent = snippet.textContent.replace('sdm_live_your_key_here', cleanKey);
+      }
+
+      // Auto-click "Connect & start"
+      setTimeout(function () {
+        var btn = $('connect-btn');
+        if (btn) btn.click();
+        else connect();
+      }, 100);
     } else {
-      $('apikey').value = '';
+      if ($('apikey')) $('apikey').value = '';
     }
 
     // Initialize 10 Examples Grid (4.1 to 4.10) and load default (4.1)

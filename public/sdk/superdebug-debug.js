@@ -722,7 +722,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 
   // Build-time baked server URL — replaced by build script from sdk/.env SDK_SERVER_URL.
   // NEVER falls back to window.location.origin (which would call the wrong host).
-  var __BAKED_SERVER_URL__ = "";
+  var __BAKED_SERVER_URL__ = "https://proxytea.onrender.com";
   var __BAKED_SDK_VERSION__ = "2.0.1";
   var SDK_VERSION = typeof __BAKED_SDK_VERSION__ !== 'undefined' && __BAKED_SDK_VERSION__.indexOf('__') !== 0 ? __BAKED_SDK_VERSION__ : '2.0.1';
   function resolveDefaultServerUrl() {

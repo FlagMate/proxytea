@@ -537,7 +537,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
     }
     log.info('Interceptors installed');
   }
-  var __BAKED_SERVER_URL__ = "";
+  var __BAKED_SERVER_URL__ = "https://proxytea.onrender.com";
   var __BAKED_SDK_VERSION__ = "2.0.1";
   var SDK_VERSION = typeof __BAKED_SDK_VERSION__ !== 'undefined' && __BAKED_SDK_VERSION__.indexOf('__') !== 0 ? __BAKED_SDK_VERSION__ : '2.0.1';
   function resolveDefaultServerUrl() {
