@@ -20,12 +20,17 @@ const config = {
   version: pkg.version || '2.0.1',
   port: parseInt(process.env.PORT || '3000', 10),
   serverBasePath: required('SERVER_BASE_PATH', 'http://localhost:3000'),
-  mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/superdebug'),
+  mongoUri: required(
+    'MONGODB_URI',
+    'mongodb+srv://proxceptadmin:MONGOatflagmate2026@proxcept-clustor.unamvf3.mongodb.net/superdebug?retryWrites=true&w=majority&appName=PROXCEPT-CLUSTOR'
+  ),
   jwtSecret: required('JWT_SECRET', 'dev-insecure-secret-change-me'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   localDomain: process.env.LOCAL_DOMAIN || 'http://localhost:3000,http://localhost:5173,http://localhost:8080,http://127.0.0.1:3000',
 
-  productionDomain: process.env.PRODUCTION_DOMAIN || 'https://proxytea.hatchable.site,https://proxytea.com,https://app.proxytea.com',
+  productionDomain:
+    process.env.PRODUCTION_DOMAIN ||
+    'https://proxytea.onrender.com,https://proxytea.hatchable.site,https://proxytea.com,https://app.proxytea.com',
   corsOrigins: Array.from(
     new Set(
       [
@@ -34,13 +39,19 @@ const config = {
           : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:8080', 'http://127.0.0.1:3000']),
         ...(process.env.PRODUCTION_DOMAIN
           ? process.env.PRODUCTION_DOMAIN.split(',')
-          : ['https://proxytea.hatchable.site', 'https://proxytea.com', 'https://app.proxytea.com']),
+          : [
+              'https://proxytea.onrender.com',
+              'https://proxytea.hatchable.site',
+              'https://proxytea.com',
+              'https://app.proxytea.com',
+            ]),
         ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : []),
       ]
         .map((o) => o.trim().replace(/\/+$/, ''))
         .filter(Boolean)
     )
   ),
+
 
   smtp: {
     host: process.env.SMTP_HOST || 'smtp.gmail.com',

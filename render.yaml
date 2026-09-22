@@ -15,10 +15,12 @@ services:
       - key: PORT
         value: 10000
       - key: MONGODB_URI
-        sync: false
+        value: mongodb+srv://proxceptadmin:MONGOatflagmate2026@proxcept-clustor.unamvf3.mongodb.net/superdebug?retryWrites=true&w=majority&appName=PROXCEPT-CLUSTOR
+
       - key: JWT_SECRET
         generateValue: true
       - key: SERVER_BASE_PATH
         sync: false
       - key: PRODUCTION_DOMAIN
-        value: https://proxytea.hatchable.site,https://proxytea.com
+        value: https://proxytea.onrender.com,https://proxytea.hatchable.site,https://proxytea.com
+

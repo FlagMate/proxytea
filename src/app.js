@@ -10,6 +10,7 @@ const apiKeyRoutes = require('./routes/apiKeys');
 const publicRoutes = require('./routes/public');
 const proxyRoutes = require('./routes/proxy');
 const { notFound, errorHandler } = require('./middleware/error');
+const { mongoose } = require('./config/db');
 
 function createApp() {
   const app = express();
@@ -26,10 +27,13 @@ function createApp() {
         config.corsOrigins.includes(normalizedOrigin) ||
         config.corsOrigins.includes(origin) ||
         config.corsOrigins.includes('*') ||
-        /^https:\/\/[a-z0-9-]+\.hatchable\.site$/.test(normalizedOrigin)
+        /^https:\/\/[a-z0-9-]+\.hatchable\.site$/.test(normalizedOrigin) ||
+        /^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(normalizedOrigin) ||
+        normalizedOrigin.endsWith('.onrender.com')
       ) {
         return cb(null, true);
       }
+
       return cb(new Error(`Origin ${origin} not allowed by CORS`));
     },
     credentials: true,
@@ -40,10 +44,20 @@ function createApp() {
   const publicCors = cors({ origin: '*', methods: ['GET'], allowedHeaders: ['X-API-Key', 'Content-Type'] });
 
   // Health check: open CORS so the dashboard's connection indicator can read it
-  // from any dev origin (it carries no secrets).
+  // from any dev origin (it carries no secrets). Always returns 200 so deployment probes succeed.
   app.get(['/health', '/api/health'], publicCors, (req, res) => {
-    res.json({ success: true, data: { status: 'ok', version: config.version, serverBasePath: config.serverBasePath } });
+    const dbState = ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown';
+    res.json({
+      success: true,
+      data: {
+        status: 'ok',
+        version: config.version,
+        serverBasePath: config.serverBasePath,
+        database: dbState,
+      },
+    });
   });
+
 
   // Public routes first, with their own permissive CORS.
   app.use('/public', publicCors, publicRoutes);
