@@ -18,6 +18,7 @@
  *      and wildcard allowed headers.
  */
 const express = require('express');
+const { Readable } = require('stream');
 const { mongoose } = require('../config/db');
 const ApiKey = require('../models/ApiKey');
 const Rule = require('../models/Rule');
@@ -256,7 +257,12 @@ router.all('*', async (req, res) => {
       return res.send(typeof transformed.data === 'string' ? transformed.data : JSON.stringify(transformed.data));
     }
 
-    // Pipe raw binary/text arrayBuffer directly back to caller
+    // Stream raw media chunks/binary directly to caller with zero memory buffering for instant TTFB
+    if (upstreamRes.body && typeof Readable.fromWeb === 'function') {
+      return Readable.fromWeb(upstreamRes.body).pipe(res);
+    }
+
+    // Fallback: arrayBuffer
     const arrayBuffer = await upstreamRes.arrayBuffer();
     return res.send(Buffer.from(arrayBuffer));
   } catch (err) {
